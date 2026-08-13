@@ -1,0 +1,436 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================
+// ENUMS
+// ============================================
+
+enum UserRole {
+  student
+  lecturer
+  admin
+}
+
+enum EnrollmentStatus {
+  enrolled
+  completed
+  dropped
+}
+
+enum QuizDifficulty {
+  easy
+  medium
+  hard
+}
+
+enum NotificationType {
+  info
+  warning
+  success
+  error
+}
+
+enum DayOfWeek {
+  MON
+  TUE
+  WED
+  THU
+  FRI
+  SAT
+  SUN
+}
+
+// ============================================
+// MODELS
+// ============================================
+
+model User {
+  id              String    @id @default(cuid())
+  email           String    @unique
+  password_hash   String
+  full_name       String
+  student_id      String?   @unique
+  faculty         String?
+  year_of_study   Int       @default(1)
+  profile_picture String?
+  is_verified     Boolean   @default(false)
+  role            UserRole  @default(student)
+  last_login      DateTime?
+
+  // Relations
+  subjects      Subject[]      @relation("Lecturer")
+  enrollments   Enrollment[]
+  documents     Document[]
+  quizzes       Quiz[]         @relation("Creator")
+  chat_messages ChatMessage[]
+  chat_sessions ChatSession[]
+  timetable     Timetable[]
+  notifications Notification[]
+  system_logs   SystemLog[]
+  quiz_attempts QuizAttempt[]
+  study_plans   StudyPlan[]
+
+  // ເພີ່ມສ່ວນນີ້ສຳລັບ PDF
+  pdf_documents PDFDocument[] // ← ເພີ່ມເສັ້ນນີ້!
+  file_uploads  FileUpload[] 
+
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+
+  @@index([email])
+  @@index([student_id])
+  @@map("users")
+}
+
+model Subject {
+  id          String  @id @default(cuid())
+  code        String  @unique
+  name        String
+  description String?
+  credits     Int     @default(3)
+  faculty     String?
+  semester    Int?
+  year        Int?
+
+  // Relations
+  lecturer_id   String?
+  lecturer      User?         @relation("Lecturer", fields: [lecturer_id], references: [id])
+  enrollments   Enrollment[]
+  documents     Document[]
+  quizzes       Quiz[]
+  chat_messages ChatMessage[]
+  timetable     Timetable[]
+  study_plans   StudyPlan[]
+
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+
+  @@index([code])
+  @@index([faculty])
+  @@map("subjects")
+}
+
+model Enrollment {
+  id String @id @default(cuid())
+
+  // Relations
+  user_id    String
+  user       User    @relation(fields: [user_id], references: [id])
+  subject_id String
+  subject    Subject @relation(fields: [subject_id], references: [id])
+
+  semester     String?
+  grade        String?
+  status       EnrollmentStatus @default(enrolled)
+  enrolled_at  DateTime         @default(now())
+  completed_at DateTime?
+
+  @@unique([user_id, subject_id, semester])
+  @@index([user_id, subject_id])
+  @@map("enrollments")
+}
+
+model Document {
+  id             String  @id @default(cuid())
+  title          String
+  description    String?
+  file_path      String
+  file_size      Int?
+  file_type      String?
+  summary        String?
+  keywords       String?
+  view_count     Int     @default(0)
+  download_count Int     @default(0)
+  is_public      Boolean @default(true)
+
+  // Relations
+  subject_id  String?
+  subject     Subject? @relation(fields: [subject_id], references: [id])
+  uploaded_by String
+  uploader    User     @relation(fields: [uploaded_by], references: [id])
+
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+
+  @@index([subject_id])
+  @@index([uploaded_by])
+  @@map("documents")
+}
+
+model Quiz {
+  id              String         @id @default(cuid())
+  title           String
+  description     String?
+  difficulty      QuizDifficulty @default(medium)
+  total_questions Int            @default(0)
+  time_limit      Int? // ນາທີ
+  is_published    Boolean        @default(false)
+
+  // Relations
+  subject_id    String?
+  subject       Subject?      @relation(fields: [subject_id], references: [id])
+  created_by    String
+  creator       User          @relation("Creator", fields: [created_by], references: [id])
+  questions     Question[]
+  quiz_attempts QuizAttempt[]
+
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+
+  @@index([subject_id])
+  @@map("quizzes")
+}
+
+model Question {
+  id             String  @id @default(cuid())
+  question_text  String
+  option_a       String?
+  option_b       String?
+  option_c       String?
+  option_d       String?
+  correct_answer String  @db.Char(1) // A, B, C, D
+  explanation    String?
+  marks          Int     @default(1)
+  question_order Int     @default(0)
+
+  // Relations
+  quiz_id String
+  quiz    Quiz   @relation(fields: [quiz_id], references: [id])
+
+  created_at DateTime @default(now())
+
+  @@index([quiz_id])
+  @@map("questions")
+}
+
+model QuizAttempt {
+  id              String    @id @default(cuid())
+  score           Int?
+  total_questions Int
+  completed_at    DateTime?
+
+  // Relations
+  user_id String
+  user    User   @relation(fields: [user_id], references: [id])
+  quiz_id String
+  quiz    Quiz   @relation(fields: [quiz_id], references: [id])
+  answers Json? // ເກັບຄຳຕອບຂອງຜູ້ໃຊ້
+
+  created_at DateTime @default(now())
+
+  @@index([user_id, quiz_id])
+  @@map("quiz_attempts")
+}
+
+model ChatSession {
+  id         String   @id @default(cuid())
+  title      String   @default("New Chat")
+  user_id    String
+  user       User     @relation(fields: [user_id], references: [id])
+  messages   ChatMessage[]
+  is_active  Boolean  @default(true)
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+
+  @@index([user_id])
+  @@index([created_at])
+  @@map("chat_sessions")
+}
+
+
+model ChatMessage {
+  id         String  @id @default(cuid())
+  session_id String
+  session    ChatSession @relation(fields: [session_id], references: [id])
+  message    String   @db.Text
+  response   String?  @db.Text
+  context    Json? // ເກັບ metadata ເພີ່ມເຕີມ
+
+  // Relations
+  user_id    String
+  user       User     @relation(fields: [user_id], references: [id])
+  subject_id String?
+  subject    Subject? @relation(fields: [subject_id], references: [id])
+
+  created_at DateTime @default(now())
+
+  @@index([user_id, session_id])
+  @@index([created_at])
+  @@map("chat_messages")
+}
+
+model Timetable {
+  id          String    @id @default(cuid())
+  day_of_week DayOfWeek
+  start_time  DateTime
+  end_time    DateTime
+  room        String?
+  semester    String?
+
+  // Relations
+  user_id    String
+  user       User    @relation(fields: [user_id], references: [id])
+  subject_id String
+  subject    Subject @relation(fields: [subject_id], references: [id])
+
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+
+  @@unique([user_id, day_of_week, start_time, end_time])
+  @@index([user_id, day_of_week])
+  @@map("timetable")
+}
+
+model StudyPlan {
+  id          String   @id @default(cuid())
+  title       String
+  description String?
+  start_date  DateTime
+  end_date    DateTime
+  is_active   Boolean  @default(true)
+
+  // Relations
+  user_id    String
+  user       User        @relation(fields: [user_id], references: [id])
+  subject_id String?
+  subject    Subject?    @relation(fields: [subject_id], references: [id])
+  tasks      StudyTask[]
+
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+
+  @@index([user_id, is_active])
+  @@map("study_plans")
+}
+
+model StudyTask {
+  id           String   @id @default(cuid())
+  title        String
+  description  String?
+  task_date    DateTime
+  is_completed Boolean  @default(false)
+
+  // Relations
+  study_plan_id String
+  study_plan    StudyPlan @relation(fields: [study_plan_id], references: [id])
+
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+
+  @@index([study_plan_id, task_date])
+  @@map("study_tasks")
+}
+
+model Notification {
+  id      String           @id @default(cuid())
+  title   String
+  message String
+  type    NotificationType @default(info)
+  is_read Boolean          @default(false)
+  link    String?
+
+  // Relations
+  user_id String
+  user    User   @relation(fields: [user_id], references: [id])
+
+  created_at DateTime @default(now())
+
+  @@index([user_id, is_read])
+  @@index([created_at])
+  @@map("notifications")
+}
+
+model SystemLog {
+  id         String  @id @default(cuid())
+  action     String
+  details    Json?
+  ip_address String?
+  user_agent String?
+
+  // Relations
+  user_id String?
+  user    User?   @relation(fields: [user_id], references: [id])
+
+  created_at DateTime @default(now())
+
+  @@index([user_id])
+  @@index([action])
+  @@index([created_at])
+  @@map("system_logs")
+}
+
+model PDFDocument {
+  id          String   @id @default(cuid())
+  title       String
+  file_path   String
+  file_size   Int
+  pages       Int?
+  summary     String?
+  summary_lao String?
+  summary_eng String?
+  uploaded_by String
+  uploader    User     @relation(fields: [uploaded_by], references: [id], onDelete: Cascade)
+  created_at  DateTime @default(now())
+  updated_at  DateTime @updatedAt
+
+  // ເພີ່ມຄວາມສຳພັນກັບ PDFQuestion ແລະ PDFQuiz
+  questions PDFQuestion[]
+  quizzes   PDFQuiz[]
+
+  @@index([uploaded_by])
+  @@map("pdf_documents")
+}
+
+model PDFQuestion {
+  id         String      @id @default(cuid())
+  pdf_id     String
+  pdf        PDFDocument @relation(fields: [pdf_id], references: [id], onDelete: Cascade)
+  question   String
+  answer     String?
+  language   String      @default("both")
+  created_at DateTime    @default(now())
+
+  @@index([pdf_id])
+  @@map("pdf_questions")
+}
+
+model PDFQuiz {
+  id         String      @id @default(cuid())
+  pdf_id     String
+  pdf        PDFDocument @relation(fields: [pdf_id], references: [id], onDelete: Cascade)
+  questions  Json // ເກັບຂໍ້ມູນ Quiz ທັງໝົດ
+  language   String      @default("both")
+  created_at DateTime    @default(now())
+
+  @@index([pdf_id])
+  @@map("pdf_quizzes")
+}
+
+// ເພີ່ມ Model FileUpload
+model FileUpload {
+  id         String   @id @default(cuid())
+  filename   String
+  file_path  String
+  file_type  String   // 'pdf', 'image', 'document'
+  mime_type  String
+  file_size  Int
+  extracted_text String? @db.Text
+  summary    String?  @db.Text
+  processed  Boolean  @default(false)
+  
+  // Relations
+  user_id    String
+  user       User     @relation(fields: [user_id], references: [id])
+  
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+
+  @@index([user_id])
+  @@map("file_uploads")
+}
